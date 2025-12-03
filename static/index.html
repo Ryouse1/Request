@@ -3,14 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <title>ウェブサイト総合解析ツール</title>
-<style>
-body { font-family: sans-serif; margin: 20px; }
-input, button { font-size: 16px; padding: 5px; }
-#output { margin-top: 20px; white-space: pre-wrap; background: #f0f0f0; padding: 10px; border-radius: 6px;}
-</style>
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
-
 <h1>ウェブサイト総合解析ツール</h1>
 <p>解析したい URL を入力してください（http/https 必須）:</p>
 <input type="text" id="urlInput" placeholder="https://example.com" size="50">
@@ -24,80 +19,24 @@ async function analyze() {
     const output = document.getElementById("output");
     output.textContent = "解析中…";
 
-    if (!url.startsWith("http")) {
+    if(!url.startsWith("http")) {
         output.textContent = "URLは http:// または https:// で始めてください";
         return;
     }
 
     try {
-        const headersPromise = fetch(url, { method: "GET" })
-            .then(res => {
-                let headersText = "";
-                res.headers.forEach((v,k)=>headersText += `${k}: ${v}\n`);
-                return {status: res.status, headers: headersText};
-            }).catch(e => ({status: "取得不可", headers: "取得不可"}));
+        // Node.jsプロキシ経由でCORS回避
+        const proxyUrl = `/proxy?url=${encodeURIComponent(url)}`;
+        const res = await fetch(proxyUrl);
+        const text = await res.text();
 
-        // DNS / IP 情報取得（外部APIを利用）
-        const host = (new URL(url)).hostname;
-        const dnsPromise = fetch(`https://dns.google/resolve?name=${host}`)
-            .then(res => res.json())
-            .catch(e => ({Status: "取得不可"}));
-
-        // SSL 情報（証明書の有効期限を取得する簡易版、サードパーティAPI利用）
-        const sslPromise = fetch(`https://api.ssllabs.com/api/v3/analyze?host=${host}`)
-            .then(res => res.json())
-            .catch(e => ({status: "取得不可"}));
-
-        // iframeによるライブラリ・DOM解析
-        const iframePromise = new Promise(resolve=>{
-            const frame = document.createElement("iframe");
-            frame.style.display="none";
-            frame.src = url;
-            document.body.appendChild(frame);
-            frame.onload = ()=>{
-                try{
-                    const doc = frame.contentDocument || frame.contentWindow.document;
-                    const scripts = [...doc.querySelectorAll("script")].map(s=>s.src || "inline").slice(0,20);
-                    const metas = [...doc.querySelectorAll("meta")].map(m=>m.outerHTML).slice(0,20);
-                    const entries = performance.getEntriesByType("resource").slice(0,20)
-                        .map(e=>`${e.name} (${Math.round(e.duration)}ms)`);
-                    resolve({scripts, metas, entries});
-                }catch(e){
-                    resolve({scripts:["アクセス不可（CORS制限）"], metas:[], entries:[]});
-                }
-            };
-        });
-
-        const [headersRes, dnsRes, sslRes, iframeRes] = await Promise.all([headersPromise,dnsPromise,sslPromise,iframePromise]);
-
-        output.textContent = `
---- HTTPヘッダー ---
-${headersRes.headers}
-ステータス: ${headersRes.status}
-
---- DNS / IP情報 ---
-${JSON.stringify(dnsRes, null, 2)}
-
---- SSL情報 ---
-${JSON.stringify(sslRes, null, 2)}
-
---- 使用ライブラリ/スクリプト ---
-${iframeRes.scripts.join("\n")}
-
---- Metaタグ ---
-${iframeRes.metas.join("\n")}
-
---- ネットワークリクエスト (ページ読み込み) ---
-${iframeRes.entries.join("\n")}
-        `;
-
+        output.textContent = `--- HTML取得結果 ---\n${text.slice(0, 1000)}...\n\n※全体は省略`;
     } catch(e) {
-        output.textContent = "解析に失敗: " + e;
+        output.textContent = "取得失敗: " + e;
     }
 }
 
 document.getElementById("analyzeBtn").onclick = analyze;
 </script>
-
 </body>
 </html>
